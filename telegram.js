@@ -8,7 +8,9 @@ const bot = new Telegraf(process.env.TELEGRAM_BOTID);
 bot.command("start", (ctx) => {
     ctx.reply(`🗺  ¡Con este bot podés saber el clima de tu ciudad!
     \n"/add + tu ciudad" para agregar una ciudad, debe escribir su ciudad lo más detalladamente posible (ciudad, estado o provincia, país).
-    \n"/now" para saber el clima, `);
+    \n"/now" para saber el clima (si tenés más de una ciudad especificá cuál es)
+    \n"/cities" para ver tu lista de ciudades
+    \n"/delete" para eliminar una ciudad de tu lista (si tenés más de una ciudad especificá cuál deseás borrar)`);
 });
 
 bot.command("add", async (ctx) => {
