@@ -1,6 +1,6 @@
 const { Telegraf } = require("telegraf");
 
-const { callDB, callWeather } = require("./helpers");
+const { callDB, callWeather, callMapBox } = require("./helpers");
 const User = require("./models/user");
 
 const bot = new Telegraf(process.env.TELEGRAM_BOTID);
@@ -18,29 +18,63 @@ bot.command("add", async (ctx) => {
     const user = await User.findOne({ chatId });
 
     const city = ctx.update.message.text.substring(5, ctx.update.message.text.length);
-    if (city.length <= 0) return ctx.reply("🚫  Debe ingresar una ciudad válida ( '/add + tu ciudad' )");
-
     const name = ctx.chat.username;
+    const lang = ctx.update.message.from.language_code;
+
+    if (city.length <= 0) return ctx.reply("🚫  Debe ingresar una ciudad válida ( '/add + tu ciudad' )");
 
     if (!user) {
         await callDB("post", {
             chatId,
-            cities: [city.toLowerCase()],
             name,
+            lang,
         });
-    } else {
-        await callDB(
-            "put",
-            {
-                cities: [...user.cities, city.toLowerCase()],
-                name,
-            },
-            chatId
-        );
     }
+
+    const resp = await callMapBox(city, lang);
+
+    const cities = resp.map((city, id) => {
+        return [{ text: `${city.place_name}`, callback_data: `add${id}` }];
+    });
+
+    bot.telegram.sendMessage(chatId, "🗺  Seleccione su ciudad", {
+        reply_markup: {
+            inline_keyboard: [...cities],
+        },
+    });
+});
+
+bot.action(["add0", "add1", "add2", "add3", "add4"], async (ctx) => {
+    ctx.answerCbQuery();
+    ctx.deleteMessage();
+
+    const chatId = ctx.chat.id;
+    const user = await User.findOne({ chatId });
+
+    const resp = ctx.match[0].substring(3, ctx.match[0].length);
+    const city = ctx.update.callback_query.message.reply_markup.inline_keyboard[resp][0].text;
+
+    if (user.cities.includes(city)) return ctx.reply("🚫  Esa ciudad ya se encuentra en tu lista");
+
+    await callDB("put", { cities: [...user.cities, city] }, chatId);
 
     ctx.reply("✅  Ciudad añadida correctamente");
 });
+
+const citiesMenu = async (ctx) => {
+    const chatId = ctx.chat.id;
+    const user = await User.findOne({ chatId });
+
+    const cities = user.cities.map((city, id) => {
+        return [{ text: `${city}`, callback_data: `sel${id}` }];
+    });
+
+    bot.telegram.sendMessage(chatId, `🗺  Ciudades de ${user.name}`, {
+        reply_markup: {
+            inline_keyboard: [...cities],
+        },
+    });
+};
 
 bot.command("cities", async (ctx) => {
     const chatId = ctx.chat.id;
@@ -49,76 +83,61 @@ bot.command("cities", async (ctx) => {
     if (!user || !user.cities[0]) {
         ctx.reply("🚫  Ninguna ciudad encontrada, utilice el comando /add para agregar una");
     } else {
-        let cities = "";
-
-        user.cities.forEach((city, i) => {
-            cities += `\n${i + 1})  ${city}`;
-        });
-
-        ctx.reply(`🗺  Ciudades de ${user.name} \n${cities}`);
+        await citiesMenu(ctx);
     }
 });
 
-bot.command("now", async (ctx) => {
+bot.action(["sel0", "sel1", "sel2", "sel3", "sel4"], (ctx) => {
+    ctx.answerCbQuery();
+    ctx.deleteMessage();
+
+    const chatId = ctx.chat.id;
+
+    const resp = ctx.match[0].substring(3, ctx.match[0].length);
+    const city = ctx.update.callback_query.message.reply_markup.inline_keyboard[resp][0].text;
+
+    ctx.telegram.sendMessage(chatId, `${city}`, {
+        reply_markup: {
+            inline_keyboard: [
+                [
+                    { text: "❌  Borrar ciudad", callback_data: "delete" },
+                    { text: "🌡️  Ver clima", callback_data: "weather" },
+                ],
+                [{ text: "🔙  Volver", callback_data: "back" }],
+            ],
+        },
+    });
+});
+
+bot.action(["back", "delete", "weather"], async (ctx) => {
+    ctx.answerCbQuery();
+    ctx.deleteMessage();
+
     const chatId = ctx.chat.id;
     const user = await User.findOne({ chatId });
+    const city = ctx.update.callback_query.message.text;
 
-    if (!user || !user.cities[0]) {
-        return ctx.reply("🚫  Ninguna ciudad encontrada, utilice el comando /add para agregar una");
-    } else {
-        const city = ctx.update.message.text.substring(5, 6);
+    switch (ctx.update.callback_query.data) {
+        case "back":
+            await citiesMenu(ctx);
+            break;
+        case "delete":
+            const cities = user.cities.filter((userCity) => userCity !== city);
+            await callDB("put", { cities }, chatId);
 
-        if (!user.cities[1]) {
-            const text = await callWeather(chatId, 1);
-            ctx.reply(`🗺  ${text}`);
-        } else {
-            if (city.length <= 0 || !user.cities[city - 1]) {
-                if (city.length <= 0 || !user.cities[city - 1]) {
-                    let cities = "";
-
-                    user.cities.forEach((city, i) => {
-                        cities += `\n${i + 1})  ${city}`;
-                    });
-
-                    return ctx.reply(`🚫  Debe especificar una ciudad \n${cities}`);
-                }
-            }
-
+            ctx.reply("✅  Ciudad eliminada correctamente");
+            break;
+        case "weather":
             const text = await callWeather(chatId, city);
-            ctx.reply(`🗺  ${text}`);
-        }
-    }
-});
 
-bot.command("delete", async (ctx) => {
-    const chatId = ctx.chat.id;
-    const user = await User.findOne({ chatId });
-
-    if (!user || !user.cities[0]) {
-        return ctx.reply("🚫  Ninguna ciudad encontrada, utilice el comando /add para agregar una");
-    } else {
-        const city = ctx.update.message.text.substring(8, ctx.update.message.text.length);
-
-        if (!user.cities[1]) {
-            await callDB("put", { cities: [], name: user.name }, chatId);
-            ctx.reply("✅  Ciudad eliminada correctamente");
-        } else {
-            if (city.length <= 0 || !user.cities[city - 1]) {
-                let cities = "";
-
-                user.cities.forEach((city, i) => {
-                    cities += `\n${i + 1})  ${city}`;
-                });
-
-                return ctx.reply(`🚫  Debe especificar una ciudad \n${cities}`);
-            }
-
-            const cities = user.cities.filter((cityArray) => cityArray !== user.cities[city - 1]);
-
-            await callDB("put", { cities, name: user.name }, chatId);
-
-            ctx.reply("✅  Ciudad eliminada correctamente");
-        }
+            ctx.telegram.sendMessage(chatId, `🗺  ${text}`, {
+                reply_markup: {
+                    inline_keyboard: [[{ text: "🔙  Volver", callback_data: "back" }]],
+                },
+            });
+            break;
+        default:
+            break;
     }
 });
 

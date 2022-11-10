@@ -6,7 +6,7 @@ const callDB = async (method, data = {}, endpoint = "") => {
     try {
         resp = await axios({
             method,
-            url: `http://0.0.0.0:${process.env.PORT}/api/users/${endpoint}`,
+            url: `http://${(process.env.NODE_ENV = "development" ? "localhost" : "0.0.0.0")}:${process.env.PORT}/api/users/${endpoint}`,
             data,
         });
     } catch (e) {

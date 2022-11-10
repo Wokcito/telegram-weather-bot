@@ -13,7 +13,7 @@ const callWeather = async (chatId, city) => {
             method: "get",
             url: `https://api.openweathermap.org/data/2.5/weather?`,
             params: {
-                q: data.cities[city - 1],
+                q: city,
                 appid: process.env.OPENWEATHER_KEY,
                 units: data.units,
                 lang: data.lang,
