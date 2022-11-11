@@ -27,6 +27,7 @@ bot.command("add", async (ctx) => {
         await callDB("post", {
             chatId,
             name,
+            cities: [],
             lang,
         });
     }
