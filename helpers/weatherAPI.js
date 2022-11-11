@@ -8,9 +8,7 @@ const callWeather = async (chatId, cityName) => {
 
     const { cities, units, lang } = data;
 
-    const [{ lat, lon }] = cities.map((city) => {
-        if (cityName === city.name) return city;
-    });
+    const [{ lat, lon }] = cities.filter((city) => cityName === city.name);
 
     let resp;
 
