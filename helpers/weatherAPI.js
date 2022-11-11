@@ -3,8 +3,14 @@ const axios = require("axios");
 const weatherText = require("./weatherText");
 const callDB = require("./dbAPI");
 
-const callWeather = async (chatId, city) => {
+const callWeather = async (chatId, cityName) => {
     const { data } = await callDB("get", {}, chatId);
+
+    const { cities, units, lang } = data;
+
+    const [{ lat, lon }] = cities.map((city) => {
+        if (cityName === city.name) return city;
+    });
 
     let resp;
 
@@ -13,10 +19,12 @@ const callWeather = async (chatId, city) => {
             method: "get",
             url: `https://api.openweathermap.org/data/2.5/weather?`,
             params: {
-                q: city,
                 appid: process.env.OPENWEATHER_KEY,
-                units: data.units,
-                lang: data.lang,
+                units,
+                lang,
+                proximity: "ip",
+                lat,
+                lon,
             },
         });
     } catch (e) {

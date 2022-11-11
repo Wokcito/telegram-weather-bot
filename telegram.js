@@ -1,4 +1,4 @@
-const { Telegraf } = require("telegraf");
+const { Telegraf, Markup } = require("telegraf");
 
 const { callDB, callWeather, callMapBox } = require("./helpers");
 const User = require("./models/user");
@@ -34,31 +34,10 @@ bot.command("add", async (ctx) => {
     const resp = await callMapBox(city, lang);
 
     const cities = resp.map((city, id) => {
-        return [{ text: `${city.place_name}`, callback_data: `add${id}` }];
+        return [Markup.button.callback(`${city.place_name}`, `add ${id}`, false)];
     });
 
-    bot.telegram.sendMessage(chatId, "🗺  Seleccione su ciudad", {
-        reply_markup: {
-            inline_keyboard: [...cities],
-        },
-    });
-});
-
-bot.action(["add0", "add1", "add2", "add3", "add4"], async (ctx) => {
-    ctx.answerCbQuery();
-    ctx.deleteMessage();
-
-    const chatId = ctx.chat.id;
-    const user = await User.findOne({ chatId });
-
-    const resp = ctx.match[0].substring(3, ctx.match[0].length);
-    const city = ctx.update.callback_query.message.reply_markup.inline_keyboard[resp][0].text;
-
-    if (user.cities.includes(city)) return ctx.reply("🚫  Esa ciudad ya se encuentra en tu lista");
-
-    await callDB("put", { cities: [...user.cities, city] }, chatId);
-
-    ctx.reply("✅  Ciudad añadida correctamente");
+    ctx.reply("🗺  Seleccione su ciudad", Markup.inlineKeyboard(cities));
 });
 
 const citiesMenu = async (ctx) => {
@@ -66,14 +45,10 @@ const citiesMenu = async (ctx) => {
     const user = await User.findOne({ chatId });
 
     const cities = user.cities.map((city, id) => {
-        return [{ text: `${city}`, callback_data: `sel${id}` }];
+        return [Markup.button.callback(`${city.name}`, `sel ${id}`, false)];
     });
 
-    bot.telegram.sendMessage(chatId, `🗺  Ciudades de ${user.name}`, {
-        reply_markup: {
-            inline_keyboard: [...cities],
-        },
-    });
+    ctx.reply(`🗺  Ciudades de ${user.name}`, Markup.inlineKeyboard(cities));
 };
 
 bot.command("cities", async (ctx) => {
@@ -87,42 +62,42 @@ bot.command("cities", async (ctx) => {
     }
 });
 
-bot.action(["sel0", "sel1", "sel2", "sel3", "sel4"], (ctx) => {
-    ctx.answerCbQuery();
-    ctx.deleteMessage();
+const actions = () => {
+    let actions = ["back", "delete", "weather"];
 
-    const chatId = ctx.chat.id;
+    const numbers = ["0", "1", "2", "3", "4"];
 
-    const resp = ctx.match[0].substring(3, ctx.match[0].length);
-    const city = ctx.update.callback_query.message.reply_markup.inline_keyboard[resp][0].text;
-
-    ctx.telegram.sendMessage(chatId, `${city}`, {
-        reply_markup: {
-            inline_keyboard: [
-                [
-                    { text: "❌  Borrar ciudad", callback_data: "delete" },
-                    { text: "🌡️  Ver clima", callback_data: "weather" },
-                ],
-                [{ text: "🔙  Volver", callback_data: "back" }],
-            ],
-        },
+    numbers.forEach((number) => {
+        actions.push(`sel ${number}`, `add ${number}`);
     });
-});
 
-bot.action(["back", "delete", "weather"], async (ctx) => {
+    return actions;
+};
+
+bot.action(actions(), async (ctx) => {
     ctx.answerCbQuery();
     ctx.deleteMessage();
 
     const chatId = ctx.chat.id;
     const user = await User.findOne({ chatId });
+
+    let data = ctx.update.callback_query.data;
+    let cityId = "";
+
     const city = ctx.update.callback_query.message.text;
 
-    switch (ctx.update.callback_query.data) {
+    if (data.includes("sel") || data.includes("add")) {
+        let [action, id] = data.split(" ");
+        data = action;
+        cityId = id;
+    }
+
+    switch (data) {
         case "back":
             await citiesMenu(ctx);
             break;
         case "delete":
-            const cities = user.cities.filter((userCity) => userCity !== city);
+            const cities = user.cities.filter((userCity) => userCity.name !== city);
             await callDB("put", { cities }, chatId);
 
             ctx.reply("✅  Ciudad eliminada correctamente");
@@ -130,11 +105,37 @@ bot.action(["back", "delete", "weather"], async (ctx) => {
         case "weather":
             const text = await callWeather(chatId, city);
 
-            ctx.telegram.sendMessage(chatId, `🗺  ${text}`, {
-                reply_markup: {
-                    inline_keyboard: [[{ text: "🔙  Volver", callback_data: "back" }]],
-                },
+            const button = [[Markup.button.callback("🔙  Volver", "back")]];
+
+            ctx.reply(`🗺  ${text}`, Markup.inlineKeyboard(button));
+            break;
+        case "add":
+            const cityAdd = ctx.update.callback_query.message.reply_markup.inline_keyboard[cityId][0].text;
+
+            const resp = await callMapBox(cityAdd, user.lang);
+            const [lon, lat] = resp[0].geometry.coordinates;
+
+            let exist;
+
+            user.cities.forEach((userCity) => {
+                if (userCity.name === cityAdd) return (exist = true);
             });
+
+            if (exist) return ctx.reply("🚫  Esa ciudad ya se encuentra en tu lista");
+
+            await callDB("put", { cities: [...user.cities, { name: cityAdd, lat, lon }] }, chatId);
+
+            ctx.reply("✅  Ciudad añadida correctamente");
+            break;
+        case "sel":
+            const citySel = ctx.update.callback_query.message.reply_markup.inline_keyboard[cityId][0].text;
+
+            const buttons = [
+                [Markup.button.callback("❌  Borrar ciudad", "delete"), Markup.button.callback("🌡️  Ver clima", "weather")],
+                [Markup.button.callback("🔙  Volver", "back")],
+            ];
+
+            ctx.reply(`${citySel}`, Markup.inlineKeyboard(buttons));
             break;
         default:
             break;
